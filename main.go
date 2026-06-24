@@ -2,32 +2,45 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
-	"os/exec"
 
-	"github.com/bitrise-io/go-utils/pathutil"
-
+	"github.com/bitrise-io/go-steputils/stepconf"
+	"github.com/bitrise-io/go-steputils/tools"
 	"github.com/bitrise-io/go-utils/fileutil"
+	"github.com/bitrise-io/go-utils/log"
+	"github.com/bitrise-io/go-utils/pathutil"
 )
 
+type config struct {
+	FileName    string `env:"file_name,required"`
+	FileContent string `env:"file_content,required"`
+}
+
+func fail(format string, v ...interface{}) {
+	log.Errorf(format, v...)
+	os.Exit(1)
+}
+
 func main() {
-	fileName := os.Getenv("file_name")
-	absFilePath, err := pathutil.AbsPath(fileName)
+	var cfg config
+	if err := stepconf.Parse(&cfg); err != nil {
+		fail("Issue with input: %s", err)
+	}
+	stepconf.Print(cfg)
+	fmt.Println()
+
+	absFilePath, err := pathutil.AbsPath(cfg.FileName)
 	if err != nil {
-		log.Fatalf("Failed to determine absolute path of file (%s): %+v", fileName, err)
+		fail("Failed to determine absolute path of file (%s): %s", cfg.FileName, err)
 	}
 
-	if err := fileutil.WriteStringToFile(absFilePath, os.Getenv("file_content")); err != nil {
-		log.Fatalf("Failed to write into file: %+v", err)
+	if err := fileutil.WriteStringToFile(absFilePath, cfg.FileContent); err != nil {
+		fail("Failed to write into file (%s): %s", absFilePath, err)
 	}
 
-	// Output
-	cmdLog, err := exec.Command("bitrise", "envman", "add", "--key", "GENERATED_TEXT_FILE_PATH", "--value", absFilePath).CombinedOutput()
-	if err != nil {
-		fmt.Printf("Failed to expose output with envman, error: %#v | output: %s", err, cmdLog)
-		os.Exit(1)
+	if err := tools.ExportEnvironmentWithEnvman("GENERATED_TEXT_FILE_PATH", absFilePath); err != nil {
+		fail("Failed to export output (GENERATED_TEXT_FILE_PATH): %s", err)
 	}
 
-	os.Exit(0)
+	log.Donef("The generated text file is available at: %s", absFilePath)
 }
