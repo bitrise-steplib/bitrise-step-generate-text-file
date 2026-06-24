@@ -90,9 +90,11 @@ workflows:
         - use_sudo: "no"
         - file_name: ./no-sudo-unprivileged.txt
 
-  # use_sudo=no + privileged (root-owned) location -> expected to FAIL.
-  # The Step is marked is_skippable so the build continues, then we assert
-  # that the file was NOT created.
+  # use_sudo=no + privileged (root-owned) location -> expected to FAIL on
+  # non-root stacks. The Step is marked is_skippable so the build continues,
+  # then we assert that the file was NOT created. On stacks where the build runs
+  # as root the non-sudo write succeeds (root can write anywhere), so the
+  # failure scenario does not apply and the assertion is skipped.
   test_no_sudo_privileged_location_fails:
     steps:
     - path::./:
@@ -112,9 +114,14 @@ workflows:
 
             target="/etc/generate-text-file-e2e-no-sudo-privileged.txt"
 
-            if sudo test -f "$target"; then
+            if [ "$(id -u)" -eq 0 ]; then
+              echo "Running as root; a non-sudo write to a privileged location succeeds on this stack, so the failure scenario does not apply. Skipping assertion."
+              rm -f "$target"
+              exit 0
+            fi
+
+            if [ -f "$target" ]; then
               echo "File should NOT have been created without sudo, but it exists: $target"
-              sudo rm -f "$target"
               exit 1
             fi
 
