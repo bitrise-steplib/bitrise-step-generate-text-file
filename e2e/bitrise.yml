@@ -1,23 +1,20 @@
-format_version: "11"
+format_version: "13"
 default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
 
-workflows:
-  test_generate_text_file:
+step_bundles:
+  # Generates the text file, then verifies the output env var, file existence
+  # and content. When the Step ran with sudo the file is root-owned, so the
+  # verification reads/removes it with sudo too (derived from use_sudo).
+  generate_and_verify:
+    inputs:
+    - use_sudo: ""
+    - file_name: ""
     steps:
-    - change-workdir:
-        title: Switch working dir to _tmp
-        description: |-
-          To prevent step testing issues, like referencing relative
-          files with just './some-file' in the step's code, which would
-          work for testing the step from this directory directly
-          but would break if the step is included in another `bitrise.yml`.
-        inputs:
-        - path: ./_tmp
-        - is_create_path: true
     - path::./:
-        title: Step Test
+        title: Generate text file
         inputs:
-        - file_name: ./test_file.txt
+        - use_sudo: $use_sudo
+        - file_name: $file_name
         - file_content: |
             Example file content,
             multi line!
@@ -28,25 +25,104 @@ workflows:
             #!/bin/bash
             set -e
 
+            # If the Step wrote the file with sudo it is root-owned, so use
+            # sudo to read and remove it as well.
+            sudo=""
+            if [ "$use_sudo" = "yes" ]; then
+              sudo="sudo"
+            fi
+
             if [ -z "$GENERATED_TEXT_FILE_PATH" ]; then
               echo "GENERATED_TEXT_FILE_PATH output is empty"
               exit 1
             fi
 
-            if [ ! -f "$GENERATED_TEXT_FILE_PATH" ]; then
+            if ! $sudo test -f "$GENERATED_TEXT_FILE_PATH"; then
               echo "Generated file does not exist at: $GENERATED_TEXT_FILE_PATH"
               exit 1
             fi
 
             expected=$'Example file content,\nmulti line!'
-            actual="$(cat "$GENERATED_TEXT_FILE_PATH")"
+            actual="$($sudo cat "$GENERATED_TEXT_FILE_PATH")"
             if [ "$actual" != "$expected" ]; then
               echo "Generated file content does not match the expected content."
-              echo "Expected:"
-              echo "$expected"
-              echo "Actual:"
-              echo "$actual"
+              echo "Expected:"; echo "$expected"
+              echo "Actual:"; echo "$actual"
+              $sudo rm -f "$GENERATED_TEXT_FILE_PATH"
               exit 1
             fi
 
             echo "Generated file content matches the expected content."
+            $sudo rm -f "$GENERATED_TEXT_FILE_PATH"
+
+workflows:
+  # use_sudo=yes + privileged (root-owned) location -> succeeds.
+  test_use_sudo_privileged_location:
+    steps:
+    - bundle::generate_and_verify:
+        inputs:
+        - use_sudo: "yes"
+        - file_name: /etc/generate-text-file-e2e-use-sudo-privileged.txt
+
+  # use_sudo=yes + unprivileged location -> succeeds.
+  test_use_sudo_unprivileged_location:
+    steps:
+    - change-workdir:
+        title: Switch working dir to _tmp
+        inputs:
+        - path: ./_tmp
+        - is_create_path: true
+    - bundle::generate_and_verify:
+        inputs:
+        - use_sudo: "yes"
+        - file_name: ./use-sudo-unprivileged.txt
+
+  # use_sudo=no + unprivileged location -> succeeds.
+  test_no_sudo_unprivileged_location:
+    steps:
+    - change-workdir:
+        title: Switch working dir to _tmp
+        inputs:
+        - path: ./_tmp
+        - is_create_path: true
+    - bundle::generate_and_verify:
+        inputs:
+        - use_sudo: "no"
+        - file_name: ./no-sudo-unprivileged.txt
+
+  # use_sudo=no + privileged (root-owned) location -> expected to FAIL on
+  # non-root stacks. The Step is marked is_skippable so the build continues,
+  # then we assert that the file was NOT created. On stacks where the build runs
+  # as root the non-sudo write succeeds (root can write anywhere), so the
+  # failure scenario does not apply and the assertion is skipped.
+  test_no_sudo_privileged_location_fails:
+    steps:
+    - path::./:
+        title: Attempt to generate text file without sudo in a privileged location (expected to fail)
+        is_skippable: true
+        inputs:
+        - use_sudo: "no"
+        - file_name: /etc/generate-text-file-e2e-no-sudo-privileged.txt
+        - file_content: |
+            This content should never be written.
+    - script:
+        title: Verify the file was not created
+        inputs:
+        - content: |-
+            #!/bin/bash
+            set -e
+
+            target="/etc/generate-text-file-e2e-no-sudo-privileged.txt"
+
+            if [ "$(id -u)" -eq 0 ]; then
+              echo "Running as root; a non-sudo write to a privileged location succeeds on this stack, so the failure scenario does not apply. Skipping assertion."
+              rm -f "$target"
+              exit 0
+            fi
+
+            if [ -f "$target" ]; then
+              echo "File should NOT have been created without sudo, but it exists: $target"
+              exit 1
+            fi
+
+            echo "File is correctly absent; the Step failed as expected without sudo."

@@ -35,6 +35,25 @@ inputs:
     summary: Add content for the text file here. You can also use all ENV variables.
     is_expand: true
     is_required: true
+- use_sudo: "yes"
+  opts:
+    title: Fall back to sudo
+    summary: Retry the write with `sudo` if a normal write fails.
+    description: |-
+      The Step always tries a normal (non-sudo) write first, so the generated
+      file stays owned by the current user whenever possible.
+
+      If set to `"yes"` and that normal write fails, the Step retries with
+      `sudo`. This is required to generate a file in a privileged (root-owned)
+      location, for example on stacks where the build runs as a non-root user.
+      In that case the generated file will be owned by `root`.
+
+      If set to `"no"`, the Step never uses `sudo` and fails if the normal
+      write does not succeed.
+    is_required: true
+    value_options:
+    - "yes"
+    - "no"
 outputs:
 - GENERATED_TEXT_FILE_PATH:
   opts:

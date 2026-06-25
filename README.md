@@ -30,6 +30,7 @@ You can also run this step directly with [Bitrise CLI](https://github.com/bitris
 | --- | --- | --- | --- |
 | `file_name` | The name (or path) of the text file to generate. | required | `generated_text_file.txt` |
 | `file_content` | Add content for the text file here. You can also use all ENV variables. | required |  |
+| `use_sudo` | The Step always tries a normal (non-sudo) write first, so the generated file stays owned by the current user whenever possible.  If set to `"yes"` and that normal write fails, the Step retries with `sudo`. This is required to generate a file in a privileged (root-owned) location, for example on stacks where the build runs as a non-root user. In that case the generated file will be owned by `root`.  If set to `"no"`, the Step never uses `sudo` and fails if the normal write does not succeed. | required | `yes` |
 </details>
 
 <details>
